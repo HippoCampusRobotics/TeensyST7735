@@ -7,6 +7,13 @@
 #define TFT_RST 8	// RST can use any pin
 #define SD_CS 4		// CS for SD card, can use any pin
 
+#define MAVLINK_SERIAL Serial3
+#define MAVLINK_RX 15
+#define MAVLINK_TX 14
+#define MAVLINK_CTS 19
+#define MAVLINK_RTS 18
+#define MAVLINK_BAUD 921600
+
 #define DT_UPDATE_MS 100
 #define ROW_SIZE 14
 #define ROW_PADDING 5
@@ -44,11 +51,90 @@ typedef struct
 	value_updated_f_t pitch;
 	value_updated_f_t yaw;
 	value_updated_h_t time_boot_ms;
+	value_updated_h_t base_mode;
+	value_updated_h_t custom_mode;
+	value_updated_h_t state;
 
 } screen_data_t;
 
+union custom_mode
+{
+	enum MAIN_MODE : uint8_t
+	{
+		MAIN_MODE_MANUAL = 1,
+		MAIN_MODE_ALTCTL,
+		MAIN_MODE_POSCTL,
+		MAIN_MODE_AUTO,
+		MAIN_MODE_ACRO,
+		MAIN_MODE_OFFBOARD,
+		MAIN_MODE_STABILIZED,
+		MAIN_MODE_RATTITUDE
+	};
+
+	enum SUB_MODE_AUTO : uint8_t
+	{
+		SUB_MODE_AUTO_READY = 1,
+		SUB_MODE_AUTO_TAKEOFF,
+		SUB_MODE_AUTO_LOITER,
+		SUB_MODE_AUTO_MISSION,
+		SUB_MODE_AUTO_RTL,
+		SUB_MODE_AUTO_LAND,
+		SUB_MODE_AUTO_RTGS,
+		SUB_MODE_AUTO_FOLLOW_TARGET,
+		SUB_MODE_AUTO_PRECLAND
+	};
+
+	struct
+	{
+		uint16_t reserved;
+		uint8_t main_mode;
+		uint8_t sub_mode;
+	};
+	uint32_t data;
+	float data_float;
+
+	custom_mode() : data(0)
+	{
+	}
+
+	explicit custom_mode(uint32_t val) : data(val)
+	{
+	}
+
+	constexpr custom_mode(uint8_t mm, uint8_t sm) : reserved(0),
+													main_mode(mm),
+													sub_mode(sm)
+	{
+	}
+};
+
+/**
+ * @brief helper function to define any mode as uint32_t constant
+ *
+ * @param mm main mode
+ * @param sm sub mode (currently used only in auto mode)
+ * @return uint32_t representation
+ */
+constexpr uint32_t define_mode(enum custom_mode::MAIN_MODE mm, uint8_t sm = 0)
+{
+	return custom_mode(mm, sm).data;
+}
+
+/**
+ * @brief helper function to define auto mode as uint32_t constant
+ *
+ * Same as @a define_mode(custom_mode::MAIN_MODE_AUTO, sm)
+ *
+ * @param sm auto sub mode
+ * @return uint32_t representation
+ */
+constexpr uint32_t define_mode_auto(enum custom_mode::SUB_MODE_AUTO sm)
+{
+	return define_mode(custom_mode::MAIN_MODE_AUTO, sm);
+}
+
 ST7735_t3 disp = ST7735_t3(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
-screen_data_t screen_data;
+screen_data_t screen_data{};
 
 #define RGB(r, g, b) (b << 11 | g << 6 | r)
 
@@ -58,40 +144,17 @@ void handle_mavlink_message(mavlink_message_t *msg);
 void handle_message_sys_status(mavlink_message_t *msg);
 void handle_message_attitude(mavlink_message_t *msg);
 void handle_message_system_time(mavlink_message_t *msg);
+void handle_message_heartbeat(mavlink_message_t *msg);
 
+void init_serial();
+void init_display();
 void update_display();
+void mavlink_send_heartbeat();
 
 void setup()
 {
-	Serial1.begin(921600);
-	Serial.begin(921600);
-
-	screen_data.voltage.value = 0.0;
-	screen_data.voltage.updated = false;
-	screen_data.battery_remaining.value = 0;
-	screen_data.battery_remaining.updated = false;
-	screen_data.roll.value = 0;
-	screen_data.roll.updated = false;
-	screen_data.pitch.value = 0;
-	screen_data.pitch.updated = false;
-	screen_data.yaw.value = 0;
-	screen_data.yaw.updated = false;
-	screen_data.time_boot_ms.value = 0;
-	screen_data.time_boot_ms.updated = false;
-
-	pinMode(SD_CS, INPUT_PULLUP); // keep SD CS high when not using SD card
-
-	// Use this initializer if you're using a 1.8" TFT
-	disp.initR(INITR_BLACKTAB);
-	disp.useFrameBuffer(true);
-
-	disp.setRotation(1);
-
-	disp.fillRect(0, 0, disp.width(), disp.height(), RGB(0, 0, 0));
-	disp.setTextWrap(false);
-	disp.setFont(&FreeMono9pt7b);
-	disp.setTextColor(RGB(31, 31, 31), RGB(0, 0, 0));
-	disp.setCursor(0, 0);
+	init_serial();
+	init_display();
 }
 
 void loop()
@@ -102,9 +165,9 @@ void loop()
 	int16_t x, y;
 	static mavlink_message_t msg;
 	mavlink_status_t status;
-	while (Serial1.available() > 0)
+	while (MAVLINK_SERIAL.available() > 0)
 	{
-		uint8_t byte = Serial1.read();
+		uint8_t byte = MAVLINK_SERIAL.read();
 		if (mavlink_parse_char(0, byte, &msg, &status))
 		{
 			handle_mavlink_message(&msg);
@@ -114,6 +177,7 @@ void loop()
 	uint32_t now = millis();
 	if (now - t_last >= DT_UPDATE_MS)
 	{
+		mavlink_send_heartbeat();
 		update_display();
 		t_last = now;
 	}
@@ -125,9 +189,6 @@ void update_display()
 	counter++;
 	char buffer[64];
 	int16_t y = ROW_PADDING;
-	disp.setCursor(0, 100);
-	disp.print("Update: ");
-	disp.print(counter);
 	disp.setCursor(0, 0);
 	disp.setTextColor(ST7735_WHITE, ST7735_BLACK);
 
@@ -190,6 +251,86 @@ void update_display()
 		sprintf(buffer, "Uptime: %5ds", (int)(screen_data.time_boot_ms.value / 1000.0));
 		disp.print(buffer);
 	}
+
+	y += ROW_PADDING + ROW_SIZE;
+
+	if (screen_data.state.updated)
+	{
+		disp.fillRect(0, y, disp.width(), ROW_SIZE, ST7735_BLACK);
+		screen_data.state.updated = false;
+		disp.setCursor(0, y);
+		disp.print("State: ");
+		switch (screen_data.state.value)
+		{
+		case MAV_STATE_UNINIT:
+			disp.print("UNINIT");
+			break;
+		case MAV_STATE_BOOT:
+			disp.print("BOOT");
+			break;
+		case MAV_STATE_CALIBRATING:
+			disp.print("CALIB");
+			break;
+		case MAV_STATE_STANDBY:
+			disp.print("STANDBY");
+			break;
+		case MAV_STATE_ACTIVE:
+			disp.print("ACTIVE");
+			break;
+		case MAV_STATE_CRITICAL:
+			disp.print("CRIT");
+			break;
+		case MAV_STATE_EMERGENCY:
+			disp.print("EMERG");
+			break;
+		case MAV_STATE_POWEROFF:
+			disp.print("OFF");
+			break;
+		case MAV_STATE_FLIGHT_TERMINATION:
+			disp.print("TERMIN");
+			break;
+		default:
+			disp.print("?");
+			break;
+		}
+	}
+
+	y += ROW_PADDING + ROW_SIZE;
+
+	if (screen_data.custom_mode.updated)
+	{
+		screen_data.custom_mode.updated = false;
+		disp.fillRect(0, y, disp.width(), ROW_SIZE, ST7735_BLACK);
+		disp.setCursor(0, y);
+		custom_mode mode(screen_data.custom_mode.value);
+		if (mode.main_mode == custom_mode::MAIN_MODE_AUTO)
+		{
+			switch (mode.sub_mode)
+			{
+			case custom_mode::SUB_MODE_AUTO_LAND:
+				disp.print("LAND");
+				break;
+			default:
+				disp.print("SUB ???");
+				break;
+			}
+		}
+		else
+		{
+			switch (mode.main_mode)
+			{
+			case custom_mode::MAIN_MODE_OFFBOARD:
+				disp.print("OFFBOARD");
+				break;
+			case custom_mode::MAIN_MODE_MANUAL:
+				disp.print("MANUAL");
+				break;
+			default:
+				disp.print("MAIN???");
+				break;
+			}
+		}
+	}
 	disp.updateScreenAsync();
 }
 
@@ -205,6 +346,9 @@ void handle_mavlink_message(mavlink_message_t *msg)
 		break;
 	case MAVLINK_MSG_ID_SYSTEM_TIME:
 		handle_message_system_time(msg);
+		break;
+	case MAVLINK_MSG_ID_HEARTBEAT:
+		handle_message_heartbeat(msg);
 		break;
 	default:
 		break;
@@ -239,4 +383,53 @@ void handle_message_system_time(mavlink_message_t *msg)
 	mavlink_msg_system_time_decode(msg, &system_time);
 	screen_data.time_boot_ms.value = system_time.time_boot_ms;
 	screen_data.time_boot_ms.updated = true;
+}
+
+void handle_message_heartbeat(mavlink_message_t *msg)
+{
+	mavlink_heartbeat_t heartbeat;
+	mavlink_msg_heartbeat_decode(msg, &heartbeat);
+	screen_data.base_mode.value = heartbeat.base_mode;
+	screen_data.base_mode.updated = true;
+	screen_data.custom_mode.value = heartbeat.custom_mode;
+	screen_data.custom_mode.updated = true;
+	screen_data.state.value = heartbeat.system_status;
+	screen_data.state.updated = true;
+}
+
+void init_serial()
+{
+	MAVLINK_SERIAL.setTX(MAVLINK_TX);
+	MAVLINK_SERIAL.setRX(MAVLINK_RX);
+	// MAVLINK_SERIAL.attachRts(MAVLINK_RTS);
+	// MAVLINK_SERIAL.attachCts(MAVLINK_CTS);
+	MAVLINK_SERIAL.begin(MAVLINK_BAUD);
+}
+
+void init_display()
+{
+	pinMode(SD_CS, INPUT_PULLUP); // keep SD CS high when not using SD card
+
+	// Use this initializer if you're using a 1.8" TFT
+	disp.initR(INITR_BLACKTAB);
+	disp.useFrameBuffer(true);
+
+	disp.setRotation(1);
+
+	disp.fillRect(0, 0, disp.width(), disp.height(), RGB(0, 0, 0));
+	disp.setTextWrap(false);
+	disp.setFont(&FreeMono9pt7b);
+	// disp.setFont(Arial_10);
+	disp.setTextColor(RGB(31, 31, 31), RGB(0, 0, 0));
+	disp.setCursor(0, 0);
+}
+
+void mavlink_send_heartbeat()
+{
+	uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+	mavlink_message_t msg;
+	mavlink_msg_heartbeat_pack(1, 25, &msg, MAV_TYPE::MAV_TYPE_GENERIC, MAV_AUTOPILOT::MAV_AUTOPILOT_GENERIC, MAV_MODE::MAV_MODE_MANUAL_DISARMED, 0, MAV_STATE::MAV_STATE_STANDBY);
+
+	uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
+	MAVLINK_SERIAL.write(buffer, len);
 }
