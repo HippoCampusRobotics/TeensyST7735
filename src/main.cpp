@@ -1,9 +1,5 @@
-// SpeedTest written by Peter Loveday
-//
-// http://forum.pjrc.com/threads/15576-Teensy3-ST7735-Library?p=21355&viewfull=1#post21355
+#define USE_FRAME_BUFFER
 
-// This Teensy3 native optimized version requires specific pins
-//
 #define TFT_SCLK 13 // SCLK can also use pin 14
 #define TFT_MOSI 11 // MOSI can also use pin 7
 #define TFT_CS 10	// CS & DC can use pins 2, 6, 9, 10, 15, 20, 21, 22, 23
@@ -68,6 +64,7 @@ void update_display();
 void setup()
 {
 	Serial1.begin(921600);
+	Serial.begin(921600);
 
 	screen_data.voltage.value = 0.0;
 	screen_data.voltage.updated = false;
@@ -86,8 +83,7 @@ void setup()
 
 	// Use this initializer if you're using a 1.8" TFT
 	disp.initR(INITR_BLACKTAB);
-	// Use this initializer (uncomment) if you're using a 1.44" TFT
-	//disp.initR(INITR_144GREENTAB);
+	disp.useFrameBuffer(true);
 
 	disp.setRotation(1);
 
@@ -106,7 +102,6 @@ void loop()
 	int16_t x, y;
 	static mavlink_message_t msg;
 	mavlink_status_t status;
-
 	while (Serial1.available() > 0)
 	{
 		uint8_t byte = Serial1.read();
@@ -167,7 +162,7 @@ void update_display()
 			if (val > 60)
 				disp.setTextColor(ST77XX_GREEN, ST77XX_BLACK);
 
-			sprintf(buffer, "%3d%", screen_data.battery_remaining.value);
+			sprintf(buffer, "%3d", screen_data.battery_remaining.value);
 			disp.print(buffer);
 			disp.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
 		}
@@ -195,6 +190,7 @@ void update_display()
 		sprintf(buffer, "Uptime: %5ds", (int)(screen_data.time_boot_ms.value / 1000.0));
 		disp.print(buffer);
 	}
+	disp.updateScreenAsync();
 }
 
 void handle_mavlink_message(mavlink_message_t *msg)
