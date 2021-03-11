@@ -15,154 +15,65 @@
 #define MAVLINK_BAUD 921600
 
 #define DT_UPDATE_MS 100
-#define ROW_SIZE 14
-#define ROW_PADDING 5
+
+#define LED_ARMED 0xFF0000
+#define LED_READY_TO_FLY 0x00FF00
+#define LED_NOT_READY 0xFF0058;
+#define LED_HEARTBEAT_TIMEOUT 0xFF3000
+#define LED_ARMING_FAILED 0x0000FF
+
+
 
 // #include <Adafruit_GFX.h>
 #include <ST7735_t3.h>
-#include <SPI.h>
 #include <st7735_t3_font_Arial.h>
 #include "standard/mavlink.h"
-#include <Fonts/FreeMono9pt7b.h>
+#include "px4_interface.h"
+#include "display.h"
+#include <WS2812Serial.h>
+#include <TeensyTimerTool.h>
 
-typedef struct
-{
-	float value;
-	bool updated;
-} value_updated_f_t;
+const int num_led = 3;
+const int led_pin = 1;
 
-typedef struct
-{
-	int value;
-	bool updated;
-} value_updated_d_t;
+byte led_draw_buffer[num_led * 3];
+DMAMEM byte led_display_buffer[num_led * 12];
 
-typedef struct
-{
-	unsigned value;
-	bool updated;
-} value_updated_h_t;
+WS2812Serial leds(num_led, led_display_buffer, led_draw_buffer, led_pin, WS2812_GRB);
 
-typedef struct
-{
-	value_updated_f_t voltage;
-	value_updated_d_t battery_remaining;
-	value_updated_f_t roll;
-	value_updated_f_t pitch;
-	value_updated_f_t yaw;
-	value_updated_h_t time_boot_ms;
-	value_updated_h_t base_mode;
-	value_updated_h_t custom_mode;
-	value_updated_h_t state;
+uint32_t led_color;
 
-} screen_data_t;
-
-union custom_mode
-{
-	enum MAIN_MODE : uint8_t
-	{
-		MAIN_MODE_MANUAL = 1,
-		MAIN_MODE_ALTCTL,
-		MAIN_MODE_POSCTL,
-		MAIN_MODE_AUTO,
-		MAIN_MODE_ACRO,
-		MAIN_MODE_OFFBOARD,
-		MAIN_MODE_STABILIZED,
-		MAIN_MODE_RATTITUDE
-	};
-
-	enum SUB_MODE_AUTO : uint8_t
-	{
-		SUB_MODE_AUTO_READY = 1,
-		SUB_MODE_AUTO_TAKEOFF,
-		SUB_MODE_AUTO_LOITER,
-		SUB_MODE_AUTO_MISSION,
-		SUB_MODE_AUTO_RTL,
-		SUB_MODE_AUTO_LAND,
-		SUB_MODE_AUTO_RTGS,
-		SUB_MODE_AUTO_FOLLOW_TARGET,
-		SUB_MODE_AUTO_PRECLAND
-	};
-
-	struct
-	{
-		uint16_t reserved;
-		uint8_t main_mode;
-		uint8_t sub_mode;
-	};
-	uint32_t data;
-	float data_float;
-
-	custom_mode() : data(0)
-	{
-	}
-
-	explicit custom_mode(uint32_t val) : data(val)
-	{
-	}
-
-	constexpr custom_mode(uint8_t mm, uint8_t sm) : reserved(0),
-													main_mode(mm),
-													sub_mode(sm)
-	{
-	}
-};
-
-/**
- * @brief helper function to define any mode as uint32_t constant
- *
- * @param mm main mode
- * @param sm sub mode (currently used only in auto mode)
- * @return uint32_t representation
- */
-constexpr uint32_t define_mode(enum custom_mode::MAIN_MODE mm, uint8_t sm = 0)
-{
-	return custom_mode(mm, sm).data;
-}
-
-/**
- * @brief helper function to define auto mode as uint32_t constant
- *
- * Same as @a define_mode(custom_mode::MAIN_MODE_AUTO, sm)
- *
- * @param sm auto sub mode
- * @return uint32_t representation
- */
-constexpr uint32_t define_mode_auto(enum custom_mode::SUB_MODE_AUTO sm)
-{
-	return define_mode(custom_mode::MAIN_MODE_AUTO, sm);
-}
 
 ST7735_t3 disp = ST7735_t3(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
-screen_data_t screen_data{};
+DisplayManager display_manager(&disp);
 
-#define RGB(r, g, b) (b << 11 | g << 6 | r)
-
-#define SETCOLOR(c) disp.setTextColor(c, bg ? ST7735_BLACK : c);
-
-void handle_mavlink_message(mavlink_message_t *msg);
-void handle_message_sys_status(mavlink_message_t *msg);
-void handle_message_attitude(mavlink_message_t *msg);
-void handle_message_system_time(mavlink_message_t *msg);
-void handle_message_heartbeat(mavlink_message_t *msg);
+TeensyTimerTool::Timer heartbeat_timeout_timer;
+TeensyTimerTool::Timer led_switch_on_timer;
+TeensyTimerTool::OneShotTimer led_switch_off_timer;
+bool heartbeat_timed_out = false;
 
 void init_serial();
 void init_display();
 void update_display();
-void mavlink_send_heartbeat();
+void set_all_leds_color(int color);
+void heartbeat_timeout_cb();
+void led_switch_on_cb();
+void led_switch_off_cb();
 
 void setup()
 {
 	init_serial();
 	init_display();
+	leds.begin();
+	set_all_leds_color(LED_HEARTBEAT_TIMEOUT);
+	heartbeat_timeout_timer.beginPeriodic(heartbeat_timeout_cb, 3'000'000);
+	led_switch_on_timer.beginPeriodic(led_switch_on_cb, 500'000);
+	led_switch_off_timer.begin(led_switch_off_cb);
 }
 
 void loop()
 {
-	static float fps = 0.0;
 	static uint32_t t_last = 0.0;
-
-	int16_t x, y;
 	static mavlink_message_t msg;
 	mavlink_status_t status;
 	while (MAVLINK_SERIAL.available() > 0)
@@ -170,231 +81,61 @@ void loop()
 		uint8_t byte = MAVLINK_SERIAL.read();
 		if (mavlink_parse_char(0, byte, &msg, &status))
 		{
-			handle_mavlink_message(&msg);
+			px4_interface::handle_mavlink_message(&msg);
 		}
 	}
 
 	uint32_t now = millis();
 	if (now - t_last >= DT_UPDATE_MS)
 	{
-		mavlink_send_heartbeat();
+		px4_interface::send_heartbeat();
 		update_display();
 		t_last = now;
 	}
 }
 
+
 void update_display()
 {
-	static int counter = 0;
-	counter++;
-	char buffer[64];
+	disp.setCursor(3, 0);
+	disp.setTextColor(DISPLAY_COLOR_NORMAL);
+
 	int16_t y = ROW_PADDING;
-	disp.setCursor(0, 0);
-	disp.setTextColor(ST7735_WHITE, ST7735_BLACK);
+	disp.setCursor(3, y);
+	display_manager.print_state();
 
-	if (screen_data.voltage.updated)
-	{
-		disp.setCursor(0, y);
-		disp.drawRect(0, y, disp.width(), ROW_SIZE, ST7735_BLACK);
-		screen_data.voltage.updated = false;
-		screen_data.battery_remaining.updated = false;
-		disp.print("Batt: ");
-		if (screen_data.voltage.value == UINT16_MAX / 1000.0)
-		{
-			disp.setTextColor(ST77XX_RED, ST77XX_BLACK);
-			disp.print("err");
-			disp.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
-		}
-		else
-			disp.print(screen_data.voltage.value, 1);
-		disp.print("|");
-		if (screen_data.battery_remaining.value == -1)
-		{
-			disp.setTextColor(ST77XX_RED, ST77XX_BLACK);
-			disp.print("err ");
-			disp.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
-		}
-		else
-		{
-			int val = screen_data.battery_remaining.value;
-			disp.setTextColor(ST77XX_RED, ST77XX_BLACK);
-			if (val > 30)
-				disp.setTextColor(ST77XX_YELLOW, ST77XX_BLACK);
-			if (val > 60)
-				disp.setTextColor(ST77XX_GREEN, ST77XX_BLACK);
+	y += ROW_HEIGHT;
+	disp.drawFastHLine(0, y, disp.width(), DISPLAY_COLOR_NORMAL);
+	y += ROW_PADDING;
+	disp.setCursor(3, y);
+	display_manager.print_mode();
 
-			sprintf(buffer, "%3d", screen_data.battery_remaining.value);
-			disp.print(buffer);
-			disp.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
-		}
-	}
+	y += ROW_HEIGHT;
+	disp.drawFastHLine(0, y, disp.width(), DISPLAY_COLOR_NORMAL);
+	y += ROW_PADDING;
+	disp.setCursor(3, y);
+	display_manager.print_battery_status();
 
-	y += ROW_PADDING + ROW_SIZE;
+	y += ROW_HEIGHT;
+	disp.drawFastHLine(0, y, disp.width(), DISPLAY_COLOR_NORMAL);
+	y += ROW_PADDING;
+	disp.setCursor(3, y);
+	display_manager.print_uptime();
 
-	if (screen_data.roll.updated)
-	{
-		screen_data.roll.updated = false;
-		screen_data.pitch.updated = false;
-		screen_data.yaw.updated = false;
-		disp.setCursor(0, y);
-		sprintf(buffer, "Yaw: %4d(deg)", (int)(screen_data.yaw.value * 180.0 / PI));
-		disp.drawRect(0, y, disp.width(), ROW_SIZE, ST7735_BLACK);
-		disp.print(buffer);
-	}
+	y += ROW_PADDING + ROW_HEIGHT;
+	disp.fillRect(0, y-ROW_PADDING, disp.width(), ROW_PADDING, DISPLAY_COLOR_NORMAL);
+	y += ROW_PADDING;
+	disp.setCursor(3, y);
+	display_manager.print_position();
+	
+	y += ROW_HEIGHT;
+	disp.drawFastHLine(0, y, disp.width(), DISPLAY_COLOR_NORMAL);
+	y += ROW_PADDING;
+	disp.setCursor(3, y);
+	display_manager.print_orientation();
+	
 
-	y += ROW_PADDING + ROW_SIZE;
-
-	if (screen_data.time_boot_ms.updated)
-	{
-		screen_data.time_boot_ms.updated = false;
-		disp.setCursor(0, y);
-		sprintf(buffer, "Uptime: %5ds", (int)(screen_data.time_boot_ms.value / 1000.0));
-		disp.print(buffer);
-	}
-
-	y += ROW_PADDING + ROW_SIZE;
-
-	if (screen_data.state.updated)
-	{
-		disp.fillRect(0, y, disp.width(), ROW_SIZE, ST7735_BLACK);
-		screen_data.state.updated = false;
-		disp.setCursor(0, y);
-		disp.print("State: ");
-		switch (screen_data.state.value)
-		{
-		case MAV_STATE_UNINIT:
-			disp.print("UNINIT");
-			break;
-		case MAV_STATE_BOOT:
-			disp.print("BOOT");
-			break;
-		case MAV_STATE_CALIBRATING:
-			disp.print("CALIB");
-			break;
-		case MAV_STATE_STANDBY:
-			disp.print("STANDBY");
-			break;
-		case MAV_STATE_ACTIVE:
-			disp.print("ACTIVE");
-			break;
-		case MAV_STATE_CRITICAL:
-			disp.print("CRIT");
-			break;
-		case MAV_STATE_EMERGENCY:
-			disp.print("EMERG");
-			break;
-		case MAV_STATE_POWEROFF:
-			disp.print("OFF");
-			break;
-		case MAV_STATE_FLIGHT_TERMINATION:
-			disp.print("TERMIN");
-			break;
-		default:
-			disp.print("?");
-			break;
-		}
-	}
-
-	y += ROW_PADDING + ROW_SIZE;
-
-	if (screen_data.custom_mode.updated)
-	{
-		screen_data.custom_mode.updated = false;
-		disp.fillRect(0, y, disp.width(), ROW_SIZE, ST7735_BLACK);
-		disp.setCursor(0, y);
-		custom_mode mode(screen_data.custom_mode.value);
-		if (mode.main_mode == custom_mode::MAIN_MODE_AUTO)
-		{
-			switch (mode.sub_mode)
-			{
-			case custom_mode::SUB_MODE_AUTO_LAND:
-				disp.print("LAND");
-				break;
-			default:
-				disp.print("SUB ???");
-				break;
-			}
-		}
-		else
-		{
-			switch (mode.main_mode)
-			{
-			case custom_mode::MAIN_MODE_OFFBOARD:
-				disp.print("OFFBOARD");
-				break;
-			case custom_mode::MAIN_MODE_MANUAL:
-				disp.print("MANUAL");
-				break;
-			default:
-				disp.print("MAIN???");
-				break;
-			}
-		}
-	}
 	disp.updateScreenAsync();
-}
-
-void handle_mavlink_message(mavlink_message_t *msg)
-{
-	switch (msg->msgid)
-	{
-	case MAVLINK_MSG_ID_SYS_STATUS:
-		handle_message_sys_status(msg);
-		break;
-	case MAVLINK_MSG_ID_ATTITUDE:
-		handle_message_attitude(msg);
-		break;
-	case MAVLINK_MSG_ID_SYSTEM_TIME:
-		handle_message_system_time(msg);
-		break;
-	case MAVLINK_MSG_ID_HEARTBEAT:
-		handle_message_heartbeat(msg);
-		break;
-	default:
-		break;
-	}
-}
-
-void handle_message_sys_status(mavlink_message_t *msg)
-{
-	mavlink_sys_status_t sys_status;
-	mavlink_msg_sys_status_decode(msg, &sys_status);
-	screen_data.voltage.value = sys_status.voltage_battery / 1000.0;
-	screen_data.voltage.updated = true;
-	screen_data.battery_remaining.value = sys_status.battery_remaining;
-	screen_data.battery_remaining.updated = true;
-}
-
-void handle_message_attitude(mavlink_message_t *msg)
-{
-	mavlink_attitude_t attitude;
-	mavlink_msg_attitude_decode(msg, &attitude);
-	screen_data.roll.value = attitude.roll;
-	screen_data.roll.updated = true;
-	screen_data.pitch.value = attitude.pitch;
-	screen_data.pitch.updated = true;
-	screen_data.yaw.value = attitude.yaw;
-	screen_data.yaw.updated = true;
-}
-
-void handle_message_system_time(mavlink_message_t *msg)
-{
-	mavlink_system_time_t system_time;
-	mavlink_msg_system_time_decode(msg, &system_time);
-	screen_data.time_boot_ms.value = system_time.time_boot_ms;
-	screen_data.time_boot_ms.updated = true;
-}
-
-void handle_message_heartbeat(mavlink_message_t *msg)
-{
-	mavlink_heartbeat_t heartbeat;
-	mavlink_msg_heartbeat_decode(msg, &heartbeat);
-	screen_data.base_mode.value = heartbeat.base_mode;
-	screen_data.base_mode.updated = true;
-	screen_data.custom_mode.value = heartbeat.custom_mode;
-	screen_data.custom_mode.updated = true;
-	screen_data.state.value = heartbeat.system_status;
-	screen_data.state.updated = true;
 }
 
 void init_serial()
@@ -404,6 +145,10 @@ void init_serial()
 	// MAVLINK_SERIAL.attachRts(MAVLINK_RTS);
 	// MAVLINK_SERIAL.attachCts(MAVLINK_CTS);
 	MAVLINK_SERIAL.begin(MAVLINK_BAUD);
+	px4_interface::set_display_manager(&display_manager);
+	px4_interface::set_mavlink_port(&MAVLINK_SERIAL);
+	Serial.begin(115200);
+
 }
 
 void init_display()
@@ -416,20 +161,45 @@ void init_display()
 
 	disp.setRotation(1);
 
-	disp.fillRect(0, 0, disp.width(), disp.height(), RGB(0, 0, 0));
+	disp.fillScreen(DISPLAY_COLOR_BACKGROUND);
 	disp.setTextWrap(false);
-	disp.setFont(&FreeMono9pt7b);
-	// disp.setFont(Arial_10);
-	disp.setTextColor(RGB(31, 31, 31), RGB(0, 0, 0));
+	// disp.setFont(&FreeMono9pt7b);
+	disp.setFont(STANDARD_FONT);
+	disp.setTextColor(DISPLAY_COLOR_NORMAL);
 	disp.setCursor(0, 0);
 }
 
-void mavlink_send_heartbeat()
-{
-	uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
-	mavlink_message_t msg;
-	mavlink_msg_heartbeat_pack(1, 25, &msg, MAV_TYPE::MAV_TYPE_GENERIC, MAV_AUTOPILOT::MAV_AUTOPILOT_GENERIC, MAV_MODE::MAV_MODE_MANUAL_DISARMED, 0, MAV_STATE::MAV_STATE_STANDBY);
 
-	uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
-	MAVLINK_SERIAL.write(buffer, len);
+
+void set_all_leds_color(int color)
+{
+	for (int i = 0; i < leds.numPixels(); i++)
+	{
+		leds.setPixel(i, color);
+	}
+	leds.show();
+}
+
+void heartbeat_timeout_cb()
+{
+	if (heartbeat_timed_out)
+	{
+		led_color = LED_HEARTBEAT_TIMEOUT;
+	}
+	else
+	{
+		heartbeat_timed_out = true;
+	}
+}
+
+void led_switch_on_cb()
+{
+	set_all_leds_color(led_color);
+	if (led_color == LED_ARMED)
+		led_switch_off_timer.trigger(100'000);
+}
+
+void led_switch_off_cb()
+{
+	set_all_leds_color(0);
 }
