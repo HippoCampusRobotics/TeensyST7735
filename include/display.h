@@ -42,28 +42,28 @@ typedef struct
 class DisplayManager
 {
     ST7735_t3 *_display;
-    position_t _position {};
-    update_status_t _position_update {};
-    orientation_t _orientation {};
-    update_status_t _orientation_update {};
+    position_t _position{};
+    update_status_t _position_update{};
+    orientation_t _orientation{};
+    update_status_t _orientation_update{};
     int _battery_remaining;
-    update_status_t _battery_remaining_update {};
+    update_status_t _battery_remaining_update{};
     float _voltage;
-    update_status_t _voltage_update {};
+    update_status_t _voltage_update{};
     uint32_t _time_boot_ms;
-    update_status_t _time_boot_ms_update {};
+    update_status_t _time_boot_ms_update{};
     custom_mode _mode;
-    update_status_t _mode_update {};
+    update_status_t _mode_update{};
     uint32_t _state;
-    update_status_t _state_update {};
+    update_status_t _state_update{};
     bool _prearm_check_passed;
-    update_status_t _prearm_check_passed_update {};
+    update_status_t _prearm_check_passed_update{};
 
     inline void delete_line()
     {
         int16_t y;
         y = _display->getCursorY();
-        _display->fillRect(0, y-2, _display->width(), ROW_HEIGHT+2, DISPLAY_COLOR_BACKGROUND);
+        _display->fillRect(0, y - 2, _display->width(), ROW_HEIGHT + 2, DISPLAY_COLOR_BACKGROUND);
     }
 
     inline void check_stamp(uint32_t stamp, update_status_t &update_status)
@@ -115,6 +115,8 @@ public:
     void print_uptime();
     void print_mode();
     void print_state();
+
+    bool is_armed();
 };
 
 #endif

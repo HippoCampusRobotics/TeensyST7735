@@ -17,5 +17,6 @@ namespace px4_interface
     void set_display_manager(DisplayManager *ptr);
     void set_mavlink_port(HardwareSerial *port);
     void send_heartbeat();
+    void init(DisplayManager *ptr, HardwareSerial *port);
 }
 #endif

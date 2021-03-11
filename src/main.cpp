@@ -22,34 +22,16 @@
 #define LED_HEARTBEAT_TIMEOUT 0xFF3000
 #define LED_ARMING_FAILED 0x0000FF
 
-
-
 // #include <Adafruit_GFX.h>
 #include <ST7735_t3.h>
 #include <st7735_t3_font_Arial.h>
 #include "standard/mavlink.h"
 #include "px4_interface.h"
 #include "display.h"
-#include <WS2812Serial.h>
-#include <TeensyTimerTool.h>
-
-const int num_led = 3;
-const int led_pin = 1;
-
-byte led_draw_buffer[num_led * 3];
-DMAMEM byte led_display_buffer[num_led * 12];
-
-WS2812Serial leds(num_led, led_display_buffer, led_draw_buffer, led_pin, WS2812_GRB);
-
-uint32_t led_color;
-
 
 ST7735_t3 disp = ST7735_t3(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 DisplayManager display_manager(&disp);
 
-TeensyTimerTool::Timer heartbeat_timeout_timer;
-TeensyTimerTool::Timer led_switch_on_timer;
-TeensyTimerTool::OneShotTimer led_switch_off_timer;
 bool heartbeat_timed_out = false;
 
 void init_serial();
@@ -64,11 +46,7 @@ void setup()
 {
 	init_serial();
 	init_display();
-	leds.begin();
-	set_all_leds_color(LED_HEARTBEAT_TIMEOUT);
-	heartbeat_timeout_timer.beginPeriodic(heartbeat_timeout_cb, 3'000'000);
-	led_switch_on_timer.beginPeriodic(led_switch_on_cb, 500'000);
-	led_switch_off_timer.begin(led_switch_off_cb);
+	px4_interface::init(&display_manager, &MAVLINK_SERIAL);
 }
 
 void loop()
@@ -93,7 +71,6 @@ void loop()
 		t_last = now;
 	}
 }
-
 
 void update_display()
 {
@@ -123,17 +100,16 @@ void update_display()
 	display_manager.print_uptime();
 
 	y += ROW_PADDING + ROW_HEIGHT;
-	disp.fillRect(0, y-ROW_PADDING, disp.width(), ROW_PADDING, DISPLAY_COLOR_NORMAL);
+	disp.fillRect(0, y - ROW_PADDING, disp.width(), ROW_PADDING, DISPLAY_COLOR_NORMAL);
 	y += ROW_PADDING;
 	disp.setCursor(3, y);
 	display_manager.print_position();
-	
+
 	y += ROW_HEIGHT;
 	disp.drawFastHLine(0, y, disp.width(), DISPLAY_COLOR_NORMAL);
 	y += ROW_PADDING;
 	disp.setCursor(3, y);
 	display_manager.print_orientation();
-	
 
 	disp.updateScreenAsync();
 }
@@ -145,10 +121,7 @@ void init_serial()
 	// MAVLINK_SERIAL.attachRts(MAVLINK_RTS);
 	// MAVLINK_SERIAL.attachCts(MAVLINK_CTS);
 	MAVLINK_SERIAL.begin(MAVLINK_BAUD);
-	px4_interface::set_display_manager(&display_manager);
-	px4_interface::set_mavlink_port(&MAVLINK_SERIAL);
 	Serial.begin(115200);
-
 }
 
 void init_display()
@@ -167,39 +140,4 @@ void init_display()
 	disp.setFont(STANDARD_FONT);
 	disp.setTextColor(DISPLAY_COLOR_NORMAL);
 	disp.setCursor(0, 0);
-}
-
-
-
-void set_all_leds_color(int color)
-{
-	for (int i = 0; i < leds.numPixels(); i++)
-	{
-		leds.setPixel(i, color);
-	}
-	leds.show();
-}
-
-void heartbeat_timeout_cb()
-{
-	if (heartbeat_timed_out)
-	{
-		led_color = LED_HEARTBEAT_TIMEOUT;
-	}
-	else
-	{
-		heartbeat_timed_out = true;
-	}
-}
-
-void led_switch_on_cb()
-{
-	set_all_leds_color(led_color);
-	if (led_color == LED_ARMED)
-		led_switch_off_timer.trigger(100'000);
-}
-
-void led_switch_off_cb()
-{
-	set_all_leds_color(0);
 }

@@ -171,7 +171,8 @@ void DisplayManager::print_battery_status()
     }
     _display->setTextColor(DISPLAY_COLOR_NORMAL);
 }
-void DisplayManager::print_uptime(){
+void DisplayManager::print_uptime()
+{
     if (!(_display && time_boot_ms_is_updated()))
         return;
     delete_line();
@@ -182,76 +183,76 @@ void DisplayManager::print_uptime(){
 void DisplayManager::print_mode()
 {
     if (!(_display && mode_is_updated()))
-    return;
+        return;
     delete_line();
     custom_mode mode = get_mode();
     _display->print("Mode: ");
     if (mode.main_mode == custom_mode::MAIN_MODE_AUTO)
     {
-    	switch (mode.sub_mode)
-			{
-			case custom_mode::SUB_MODE_AUTO_LAND:
-				_display->print("LAND");
-				break;
-			case custom_mode::SUB_MODE_AUTO_READY:
-				_display->print("READY");
-				break;
-			case custom_mode::SUB_MODE_AUTO_TAKEOFF:
-				_display->print("TAKEOFF");
-				break;
-			case custom_mode::SUB_MODE_AUTO_LOITER:
-				_display->print("LOITER");
-				break;
-			case custom_mode::SUB_MODE_AUTO_MISSION:
-				_display->print("MISSION");
-				break;
-			case custom_mode::SUB_MODE_AUTO_RTL:
-				_display->print("RTL");
-				break;
-			case custom_mode::SUB_MODE_AUTO_RTGS:
-				_display->print("RTGS");
-				break;
-			case custom_mode::SUB_MODE_AUTO_FOLLOW_TARGET:
-				_display->print("FOLLOW");
-				break;
-			case custom_mode::SUB_MODE_AUTO_PRECLAND:
-				_display->print("PRECLAND");
-				break;
-			default:
-				_display->print("SUB ???");
-				break;
-			}
-		}
-		else
-		{
-			switch (mode.main_mode)
-			{
-			case custom_mode::MAIN_MODE_OFFBOARD:
-				_display->print("OFFBOARD");
-				break;
-			case custom_mode::MAIN_MODE_MANUAL:
-				_display->print("MANUAL");
-				break;
-			case custom_mode::MAIN_MODE_ALTCTL:
-				_display->print("ALTCTL");
-				break;
-			case custom_mode::MAIN_MODE_POSCTL:
-				_display->print("POSCTL");
-				break;
-			case custom_mode::MAIN_MODE_ACRO:
-				_display->print("ACRO");
-				break;
-			case custom_mode::MAIN_MODE_STABILIZED:
-				_display->print("STABILIZED");
-				break;
-			case custom_mode::MAIN_MODE_RATTITUDE:
-				_display->print("RATT");
-				break;
-			default:
-				_display->print("MAIN???");
-				break;
-			}
-		}
+        switch (mode.sub_mode)
+        {
+        case custom_mode::SUB_MODE_AUTO_LAND:
+            _display->print("LAND");
+            break;
+        case custom_mode::SUB_MODE_AUTO_READY:
+            _display->print("READY");
+            break;
+        case custom_mode::SUB_MODE_AUTO_TAKEOFF:
+            _display->print("TAKEOFF");
+            break;
+        case custom_mode::SUB_MODE_AUTO_LOITER:
+            _display->print("LOITER");
+            break;
+        case custom_mode::SUB_MODE_AUTO_MISSION:
+            _display->print("MISSION");
+            break;
+        case custom_mode::SUB_MODE_AUTO_RTL:
+            _display->print("RTL");
+            break;
+        case custom_mode::SUB_MODE_AUTO_RTGS:
+            _display->print("RTGS");
+            break;
+        case custom_mode::SUB_MODE_AUTO_FOLLOW_TARGET:
+            _display->print("FOLLOW");
+            break;
+        case custom_mode::SUB_MODE_AUTO_PRECLAND:
+            _display->print("PRECLAND");
+            break;
+        default:
+            _display->print("SUB ???");
+            break;
+        }
+    }
+    else
+    {
+        switch (mode.main_mode)
+        {
+        case custom_mode::MAIN_MODE_OFFBOARD:
+            _display->print("OFFBOARD");
+            break;
+        case custom_mode::MAIN_MODE_MANUAL:
+            _display->print("MANUAL");
+            break;
+        case custom_mode::MAIN_MODE_ALTCTL:
+            _display->print("ALTCTL");
+            break;
+        case custom_mode::MAIN_MODE_POSCTL:
+            _display->print("POSCTL");
+            break;
+        case custom_mode::MAIN_MODE_ACRO:
+            _display->print("ACRO");
+            break;
+        case custom_mode::MAIN_MODE_STABILIZED:
+            _display->print("STABILIZED");
+            break;
+        case custom_mode::MAIN_MODE_RATTITUDE:
+            _display->print("RATT");
+            break;
+        default:
+            _display->print("MAIN???");
+            break;
+        }
+    }
 }
 void DisplayManager::print_state()
 {
@@ -259,48 +260,53 @@ void DisplayManager::print_state()
         return;
     delete_line();
     _display->print("State: ");
-		switch (get_state())
-		{
-		case MAV_STATE_UNINIT:
-			_display->print("UNINIT");
-			break;
-		case MAV_STATE_BOOT:
-			_display->print("BOOT");
-			break;
-		case MAV_STATE_CALIBRATING:
-			_display->print("CALIB");
-			break;
-		case MAV_STATE_STANDBY:
-			_display->setTextColor(DISPLAY_COLOR_DISARMED);
-			_display->print("STANDBY");
-			_display->setTextColor(DISPLAY_COLOR_NORMAL);
-            // TODO: handle LEDS
-			// if (screen_data.prearm_check_passed)
-			// 	led_color = LED_READY_TO_FLY;
-			// else
-			// 	led_color = LED_NOT_READY;
-			break;
-		case MAV_STATE_ACTIVE:
-			_display->setTextColor(DISPLAY_COLOR_ARMED);
-			_display->print("ACTIVE");
-			_display->setTextColor(DISPLAY_COLOR_NORMAL);
-            // TODO: handle LEDS
-			// led_color = LED_ARMED;
-			break;
-		case MAV_STATE_CRITICAL:
-			_display->print("CRIT");
-			break;
-		case MAV_STATE_EMERGENCY:
-			_display->print("EMERG");
-			break;
-		case MAV_STATE_POWEROFF:
-			_display->print("OFF");
-			break;
-		case MAV_STATE_FLIGHT_TERMINATION:
-			_display->print("TERMIN");
-			break;
-		default:
-			_display->print("?");
-			break;
-		}
+    switch (get_state())
+    {
+    case MAV_STATE_UNINIT:
+        _display->print("UNINIT");
+        break;
+    case MAV_STATE_BOOT:
+        _display->print("BOOT");
+        break;
+    case MAV_STATE_CALIBRATING:
+        _display->print("CALIB");
+        break;
+    case MAV_STATE_STANDBY:
+        _display->setTextColor(DISPLAY_COLOR_DISARMED);
+        _display->print("STANDBY");
+        _display->setTextColor(DISPLAY_COLOR_NORMAL);
+        // TODO: handle LEDS
+        // if (screen_data.prearm_check_passed)
+        // 	led_color = LED_READY_TO_FLY;
+        // else
+        // 	led_color = LED_NOT_READY;
+        break;
+    case MAV_STATE_ACTIVE:
+        _display->setTextColor(DISPLAY_COLOR_ARMED);
+        _display->print("ACTIVE");
+        _display->setTextColor(DISPLAY_COLOR_NORMAL);
+        // TODO: handle LEDS
+        // led_color = LED_ARMED;
+        break;
+    case MAV_STATE_CRITICAL:
+        _display->print("CRIT");
+        break;
+    case MAV_STATE_EMERGENCY:
+        _display->print("EMERG");
+        break;
+    case MAV_STATE_POWEROFF:
+        _display->print("OFF");
+        break;
+    case MAV_STATE_FLIGHT_TERMINATION:
+        _display->print("TERMIN");
+        break;
+    default:
+        _display->print("?");
+        break;
+    }
+}
+
+bool DisplayManager::is_armed()
+{
+    return get_state(true) == MAV_STATE_ACTIVE;
 }

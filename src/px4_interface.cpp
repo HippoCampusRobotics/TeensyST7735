@@ -1,4 +1,5 @@
 #include "px4_interface.h"
+#include "led.h"
 
 namespace px4_interface
 {
@@ -7,13 +8,10 @@ namespace px4_interface
 
     static HardwareSerial *mavlink_port = NULL;
 
-    void set_display_manager(DisplayManager *ptr)
+    void init(DisplayManager *ptr, HardwareSerial *port)
     {
+        led_init();
         screen_data = ptr;
-    }
-
-    void set_mavlink_port(HardwareSerial *port)
-    {
         mavlink_port = port;
     }
 
@@ -53,8 +51,15 @@ namespace px4_interface
         uint32_t now = millis();
         screen_data->update_voltage(sys_status.voltage_battery / 1000.0, now);
         screen_data->update_battery_remaining((int)sys_status.battery_remaining, now);
-        screen_data->update_prearm_check((bool)(sys_status.onboard_control_sensors_health & MAV_SYS_STATUS_PREARM_CHECK),
-                                         now);
+        bool ready_to_fly = (bool)(sys_status.onboard_control_sensors_health & MAV_SYS_STATUS_PREARM_CHECK);
+        screen_data->update_prearm_check(ready_to_fly, now);
+        if (!screen_data->is_armed())
+        {
+            if (ready_to_fly)
+                led_set_state(LED_STATE_READY_TO_FLY);
+            else
+                led_set_state(LED_STATE_NOT_READY);
+        }
     }
 
     void handle_message_attitude(mavlink_message_t *msg)
@@ -64,7 +69,7 @@ namespace px4_interface
         mavlink_attitude_t attitude;
         mavlink_msg_attitude_decode(msg, &attitude);
         uint32_t now = millis();
-        screen_data->update_orientation((int)(attitude.roll*180.0/3.14), (int)(attitude.pitch*180.0/3.14), (int)(attitude.yaw*180.0/3.14), now);
+        screen_data->update_orientation((int)(attitude.roll * 180.0 / 3.14), (int)(attitude.pitch * 180.0 / 3.14), (int)(attitude.yaw * 180.0 / 3.14), now);
     }
 
     void handle_message_system_time(mavlink_message_t *msg)
@@ -83,9 +88,19 @@ namespace px4_interface
             return;
         mavlink_heartbeat_t heartbeat;
         mavlink_msg_heartbeat_decode(msg, &heartbeat);
+        led_update_heartbeat();
         uint32_t now = millis();
         screen_data->update_mode(custom_mode(heartbeat.custom_mode), now);
         screen_data->update_state(heartbeat.system_status, now);
+        if (screen_data->is_armed())
+            led_set_state(LED_STATE_ARMED);
+        else
+        {
+            if (screen_data->get_prearm_check(true))
+                led_set_state(LED_STATE_READY_TO_FLY);
+            else
+                led_set_state(LED_STATE_NOT_READY);
+        }
     }
 
     void handle_message_local_position_ned(mavlink_message_t *msg)
@@ -109,11 +124,7 @@ namespace px4_interface
         {
             if (ack.result != MAV_RESULT_ACCEPTED)
             {
-                // TODO:
-                // led_switch_on_timer.stop();
-                // led_switch_off_timer.stop();
-                // set_all_leds_color(LED_ARMING_FAILED);
-                // led_switch_on_timer.start();
+                led_set_state(LED_STATE_ARMING_FAILED);
             }
         }
     }
