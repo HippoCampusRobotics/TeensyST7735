@@ -3,15 +3,21 @@
 #define TFT_SCLK 13 // SCLK can also use pin 14
 #define TFT_MOSI 11 // MOSI can also use pin 7
 #define TFT_CS 10	// CS & DC can use pins 2, 6, 9, 10, 15, 20, 21, 22, 23
-#define TFT_DC 9	//  but certain pairs must NOT be used: 2+10, 6+9, 20+23, 21+22
-#define TFT_RST 8	// RST can use any pin
-#define SD_CS 4		// CS for SD card, can use any pin
+#define TFT_DC 22	//  but certain pairs must NOT be used: 2+10, 6+9, 20+23, 21+22
+#define TFT_RST 23	// RST can use any pin
 
+#if defined(__MK20DX256__)
 #define MAVLINK_SERIAL Serial3
-#define MAVLINK_RX 15
-#define MAVLINK_TX 14
-#define MAVLINK_CTS 19
-#define MAVLINK_RTS 18
+#endif
+
+#if defined(__IMXRT1062__)
+#define MAVLINK_SERIAL Serial2
+#endif
+
+
+#define MAVLINK_RX 7
+#define MAVLINK_TX 8
+
 #define MAVLINK_BAUD 921600
 
 #define DT_UPDATE_MS 100
@@ -126,11 +132,20 @@ void init_serial()
 
 void init_display()
 {
-	pinMode(SD_CS, INPUT_PULLUP); // keep SD CS high when not using SD card
-
 	// Use this initializer if you're using a 1.8" TFT
 	disp.initR(INITR_BLACKTAB);
 	disp.useFrameBuffer(true);
+	#if defined(__MK20DX256__)
+	disp.print("Using Teensy 3.2");
+	#endif
+	#if defined(__IMXRT1062__)
+	disp.print("Using Teensy 4.x");
+	#endif
+
+	disp.updateScreen();
+	delay(5000);
+	disp.fillScreen(DISPLAY_COLOR_BACKGROUND);
+	disp.updateScreen();
 
 	disp.setRotation(1);
 

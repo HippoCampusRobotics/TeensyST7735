@@ -133,7 +133,7 @@ namespace px4_interface
     {
         uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
         mavlink_message_t msg;
-        mavlink_msg_heartbeat_pack(1, 25, &msg, MAV_TYPE::MAV_TYPE_GENERIC, MAV_AUTOPILOT::MAV_AUTOPILOT_GENERIC, MAV_MODE::MAV_MODE_MANUAL_DISARMED, 0, MAV_STATE::MAV_STATE_STANDBY);
+        mavlink_msg_heartbeat_pack(1, MAV_COMPONENT::MAV_COMP_ID_PERIPHERAL, &msg, MAV_TYPE::MAV_TYPE_GENERIC, MAV_AUTOPILOT::MAV_AUTOPILOT_GENERIC, MAV_MODE::MAV_MODE_MANUAL_DISARMED, 0, MAV_STATE::MAV_STATE_STANDBY);
 
         uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
         if (mavlink_port)
